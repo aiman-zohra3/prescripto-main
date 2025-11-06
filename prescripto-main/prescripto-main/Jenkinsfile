@@ -1,0 +1,63 @@
+pipeline {
+  agent any
+
+  options {
+    skipDefaultCheckout(true)
+    timestamps()
+  }
+
+  environment {
+    COMPOSE_FILE = 'docker-compose.yml'
+  }
+
+  stages {
+    stage('Checkout') {
+      steps {
+        checkout scm
+      }
+    }
+
+    stage('Docker Info') {
+      steps {
+        sh 'docker --version'
+        sh 'docker compose version || docker-compose --version'
+      }
+    }
+
+    stage('Prepare Network') {
+      steps {
+        sh 'docker network inspect prescripto >/dev/null 2>&1 || docker network create prescripto'
+      }
+    }
+
+    stage('Build (Containerized)') {
+      steps {
+        sh 'docker compose -f ${COMPOSE_FILE} pull || true'
+        sh 'docker compose -f ${COMPOSE_FILE} up -d backend'
+        sh 'docker compose -f ${COMPOSE_FILE} run --rm backend sh -c "node -v && npm -v"'
+        sh 'docker compose -f ${COMPOSE_FILE} run --rm backend sh -c "npm ci && npm test --if-present"'
+        sh 'docker compose -f ${COMPOSE_FILE} run --rm client sh -c "npm ci && npm run build || npm run build --if-present"'
+        sh 'docker compose -f ${COMPOSE_FILE} run --rm admin sh -c "npm ci && npm run build || npm run build --if-present"'
+      }
+    }
+
+    stage('Smoke (Up Services)') {
+      steps {
+        sh 'docker compose -f ${COMPOSE_FILE} up -d'
+        sh 'sleep 5'
+        sh 'docker ps'
+      }
+    }
+  }
+
+  post {
+    always {
+      sh 'docker compose -f ${COMPOSE_FILE} logs --no-color || true'
+    }
+    cleanup {
+      sh 'docker compose -f ${COMPOSE_FILE} down -v || true'
+    }
+  }
+}
+
+

@@ -1,0 +1,364 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Prescripto - Medical Appointment Booking System on AWS ECS'
+
+Parameters:
+  AwsAccountId:
+    Type: String
+    Description: AWS Account ID
+  
+  Region:
+    Type: String
+    Default: us-east-1
+    Description: AWS Region
+  
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC ID where resources will be created
+  
+  SubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Subnet IDs for ECS tasks (at least 2 for high availability)
+  
+  MongoDBUri:
+    Type: String
+    Description: MongoDB connection URI (from MongoDB Atlas or other)
+    NoEcho: true
+  
+  CloudinaryCloudName:
+    Type: String
+    Description: Cloudinary Cloud Name
+    NoEcho: true
+  
+  CloudinaryApiKey:
+    Type: String
+    Description: Cloudinary API Key
+    NoEcho: true
+  
+  CloudinaryApiSecret:
+    Type: String
+    Description: Cloudinary API Secret
+    NoEcho: true
+  
+  JwtSecret:
+    Type: String
+    Description: JWT Secret for authentication
+    NoEcho: true
+
+Resources:
+  # CloudWatch Log Groups
+  BackendLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /ecs/prescripto-backend
+      RetentionInDays: 7
+  
+  FrontendLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /ecs/prescripto-frontend
+      RetentionInDays: 7
+
+  # Secrets Manager
+  MongoDBSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: prescripto/mongodb-uri
+      SecretString: !Ref MongoDBUri
+      Description: MongoDB connection URI for Prescripto
+  
+  CloudinaryCloudNameSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: prescripto/cloudinary-cloud-name
+      SecretString: !Ref CloudinaryCloudName
+  
+  CloudinaryApiKeySecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: prescripto/cloudinary-api-key
+      SecretString: !Ref CloudinaryApiKey
+  
+  CloudinaryApiSecretSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: prescripto/cloudinary-api-secret
+      SecretString: !Ref CloudinaryApiSecret
+  
+  JwtSecretSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: prescripto/jwt-secret
+      SecretString: !Ref JwtSecret
+
+  # Security Group for ALB
+  ALBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: prescripto-alb-sg
+      GroupDescription: Security group for Application Load Balancer
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+
+  # Security Group for ECS Tasks
+  ECSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: prescripto-ecs-sg
+      GroupDescription: Security group for ECS tasks
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 4000
+          ToPort: 4000
+          SourceSecurityGroupId: !Ref ALBSecurityGroup
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          SourceSecurityGroupId: !Ref ALBSecurityGroup
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+
+  # Application Load Balancer
+  ApplicationLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: prescripto-alb
+      Scheme: internet-facing
+      Type: application
+      Subnets: !Ref SubnetIds
+      SecurityGroups:
+        - !Ref ALBSecurityGroup
+
+  # Target Group for Backend
+  BackendTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: prescripto-backend-tg
+      Port: 4000
+      Protocol: HTTP
+      VpcId: !Ref VpcId
+      TargetType: ip
+      HealthCheckPath: /
+      HealthCheckProtocol: HTTP
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+
+  # Target Group for Frontend
+  FrontendTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: prescripto-frontend-tg
+      Port: 80
+      Protocol: HTTP
+      VpcId: !Ref VpcId
+      TargetType: ip
+      HealthCheckPath: /
+      HealthCheckProtocol: HTTP
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+
+  # ALB Listener
+  ALBListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref FrontendTargetGroup
+      LoadBalancerArn: !Ref ApplicationLoadBalancer
+      Port: 80
+      Protocol: HTTP
+
+  # ALB Listener Rule for Backend
+  BackendListenerRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref BackendTargetGroup
+      Conditions:
+        - Field: path-pattern
+          Values:
+            - /api/*
+      ListenerArn: !Ref ALBListener
+      Priority: 1
+
+  # ECS Cluster
+  ECSCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: prescripto-cluster
+      ClusterSettings:
+        - Name: containerInsights
+          Value: enabled
+
+  # ECS Service for Backend
+  BackendService:
+    Type: AWS::ECS::Service
+    DependsOn:
+      - BackendTaskDefinition
+      - BackendTargetGroup
+    Properties:
+      ServiceName: prescripto-backend-service
+      Cluster: !Ref ECSCluster
+      TaskDefinition: !Ref BackendTaskDefinition
+      DesiredCount: 2
+      LaunchType: FARGATE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: ENABLED
+          SecurityGroups:
+            - !Ref ECSSecurityGroup
+          Subnets: !Ref SubnetIds
+      LoadBalancers:
+        - ContainerName: prescripto-backend
+          ContainerPort: 4000
+          TargetGroupArn: !Ref BackendTargetGroup
+
+  # ECS Service for Frontend
+  FrontendService:
+    Type: AWS::ECS::Service
+    DependsOn:
+      - FrontendTaskDefinition
+      - FrontendTargetGroup
+    Properties:
+      ServiceName: prescripto-frontend-service
+      Cluster: !Ref ECSCluster
+      TaskDefinition: !Ref FrontendTaskDefinition
+      DesiredCount: 2
+      LaunchType: FARGATE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: ENABLED
+          SecurityGroups:
+            - !Ref ECSSecurityGroup
+          Subnets: !Ref SubnetIds
+      LoadBalancers:
+        - ContainerName: prescripto-frontend
+          ContainerPort: 80
+          TargetGroupArn: !Ref FrontendTargetGroup
+
+  # IAM Role for ECS Tasks
+  ECSTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+      Policies:
+        - PolicyName: SecretsManagerAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource:
+                  - !Ref MongoDBSecret
+                  - !Ref CloudinaryCloudNameSecret
+                  - !Ref CloudinaryApiKeySecret
+                  - !Ref CloudinaryApiSecretSecret
+                  - !Ref JwtSecretSecret
+
+  # Task Definition for Backend (placeholder - you'll need to update with actual image)
+  BackendTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: prescripto-backend
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      Cpu: '256'
+      Memory: '512'
+      ExecutionRoleArn: !GetAtt ECSTaskRole.Arn
+      TaskRoleArn: !GetAtt ECSTaskRole.Arn
+      ContainerDefinitions:
+        - Name: prescripto-backend
+          Image: !Sub '${AwsAccountId}.dkr.ecr.${Region}.amazonaws.com/prescripto-backend:latest'
+          PortMappings:
+            - ContainerPort: 4000
+              Protocol: tcp
+          Essential: true
+          Environment:
+            - Name: PORT
+              Value: '4000'
+          Secrets:
+            - Name: MONGODB_URI
+              ValueFrom: !Ref MongoDBSecret
+            - Name: CLOUDINARY_CLOUD_NAME
+              ValueFrom: !Ref CloudinaryCloudNameSecret
+            - Name: CLOUDINARY_API_KEY
+              ValueFrom: !Ref CloudinaryApiKeySecret
+            - Name: CLOUDINARY_API_SECRET
+              ValueFrom: !Ref CloudinaryApiSecretSecret
+            - Name: JWT_SECRET
+              ValueFrom: !Ref JwtSecretSecret
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref BackendLogGroup
+              awslogs-region: !Ref Region
+              awslogs-stream-prefix: ecs
+
+  # Task Definition for Frontend
+  FrontendTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: prescripto-frontend
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      Cpu: '256'
+      Memory: '512'
+      ExecutionRoleArn: !GetAtt ECSTaskRole.Arn
+      TaskRoleArn: !GetAtt ECSTaskRole.Arn
+      ContainerDefinitions:
+        - Name: prescripto-frontend
+          Image: !Sub '${AwsAccountId}.dkr.ecr.${Region}.amazonaws.com/prescripto-frontend:latest'
+          PortMappings:
+            - ContainerPort: 80
+              Protocol: tcp
+          Essential: true
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref FrontendLogGroup
+              awslogs-region: !Ref Region
+              awslogs-stream-prefix: ecs
+
+Outputs:
+  LoadBalancerDNS:
+    Description: DNS name of the Application Load Balancer
+    Value: !GetAtt ApplicationLoadBalancer.DNSName
+    Export:
+      Name: !Sub '${AWS::StackName}-ALB-DNS'
+  
+  BackendURL:
+    Description: Backend API URL
+    Value: !Sub 'http://${ApplicationLoadBalancer.DNSName}/api'
+  
+  FrontendURL:
+    Description: Frontend URL
+    Value: !Sub 'http://${ApplicationLoadBalancer.DNSName}'
+
