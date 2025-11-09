@@ -2,56 +2,53 @@ version: "3.9"
 services:
   backend:
     image: node:20-alpine
-    container_name: jx-prescripto-backend
-    working_dir: /app
+    container_name: prescripto-backend-ci
     restart: unless-stopped
-    env_file:
-      - ./backend/.env
-    command: sh -c "npm ci && npm start"
+    working_dir: /app
     volumes:
       - ./backend:/app
+    env_file:
+      - ./backend/.env
     ports:
-      - "4100:4000"
+      - "5000:4000"
+    command: sh -c "npm install && npm start"
     networks:
       - prescripto
 
   client:
     image: node:20-alpine
-    container_name: jx-prescripto-client
-    working_dir: /app
+    container_name: prescripto-client-ci
     restart: unless-stopped
-    environment:
-      - VITE_BACKEND_URL=http://backend:4000
-    depends_on:
-      - backend
-    command: sh -c "npm ci && npm run dev -- --host 0.0.0.0 --port 5175"
+    working_dir: /app
     volumes:
       - ./clientside:/app
+    environment:
+      - VITE_BACKEND_URL=http://YOUR_EC2_PUBLIC_IP:5000
+    depends_on:
+      - backend
     ports:
-      - "5175:5175"
+      - "6000:5173"
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0 --port 5173"
     networks:
       - prescripto
 
   admin:
     image: node:20-alpine
-    container_name: jx-prescripto-admin
-    working_dir: /app
+    container_name: prescripto-admin-ci
     restart: unless-stopped
-    environment:
-      - VITE_BACKEND_URL=http://backend:4000
-    depends_on:
-      - backend
-    command: sh -c "npm ci && npm run dev -- --host 0.0.0.0 --port 5176"
+    working_dir: /app
     volumes:
       - ./admin:/app
+    environment:
+      - VITE_BACKEND_URL=http://YOUR_EC2_PUBLIC_IP:5000
+    depends_on:
+      - backend
     ports:
-      - "5176:5176"
+      - "6001:5174"
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0 --port 5174"
     networks:
       - prescripto
 
 networks:
   prescripto:
     driver: bridge
-
-
-

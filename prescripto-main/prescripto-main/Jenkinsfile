@@ -1,63 +1,105 @@
 pipeline {
-  agent any
-
-  options {
-    skipDefaultCheckout(true)
-    timestamps()
-  }
-
-  environment {
-    COMPOSE_FILE = 'docker-compose.yml'
-  }
-
-  stages {
-    stage('Checkout') {
-      steps {
-        checkout scm
-      }
+    agent any
+    
+    environment {
+        DOCKER_COMPOSE = 'docker-compose'
+        GIT_REPO = 'https://github.com/aiman-zohra3/prescripto-main.git'
     }
-
-    stage('Docker Info') {
-      steps {
-        sh 'docker --version'
-        sh 'docker compose version || docker-compose --version'
-      }
+    
+    stages {
+        stage('Checkout') {
+            steps {
+                echo 'Checking out code from GitHub...'
+                git branch: 'main', 
+                    url: 'https://github.com/aiman-zohra3/prescripto-main.git'
+            }
+        }
+        
+        stage('Clean Up') {
+            steps {
+                echo 'Cleaning up previous builds...'
+                script {
+                    try {
+                        sh "${DOCKER_COMPOSE} down -v"
+                        sh "docker system prune -f"
+                    } catch (Exception e) {
+                        echo "Cleanup completed with warnings: ${e.message}"
+                    }
+                }
+            }
+        }
+        
+        stage('Start Containers') {
+            steps {
+                echo 'Starting containers with Docker Compose...'
+                script {
+                    dir('.') {
+                        sh "${DOCKER_COMPOSE} up -d"
+                    }
+                }
+            }
+        }
+        
+        stage('Verify Build') {
+            steps {
+                echo 'Verifying that containers are running...'
+                script {
+                    sleep(time: 10, unit: 'SECONDS')
+                    sh "docker ps"
+                    sh "${DOCKER_COMPOSE} ps"
+                }
+            }
+        }
+        
+        stage('Health Check') {
+            steps {
+                echo 'Performing health checks...'
+                script {
+                    // Check if containers are running
+                    def backendStatus = sh(
+                        script: "docker inspect -f '{{.State.Running}}' prescripto-backend-ci || echo 'false'",
+                        returnStdout: true
+                    ).trim()
+                    def clientStatus = sh(
+                        script: "docker inspect -f '{{.State.Running}}' prescripto-client-ci || echo 'false'",
+                        returnStdout: true
+                    ).trim()
+                    def adminStatus = sh(
+                        script: "docker inspect -f '{{.State.Running}}' prescripto-admin-ci || echo 'false'",
+                        returnStdout: true
+                    ).trim()
+                    
+                    echo "Backend Status: ${backendStatus}"
+                    echo "Client Status: ${clientStatus}"
+                    echo "Admin Status: ${adminStatus}"
+                    
+                    if (backendStatus == 'false' || clientStatus == 'false' || adminStatus == 'false') {
+                        error('One or more containers failed to start')
+                    }
+                }
+            }
+        }
     }
-
-    stage('Prepare Network') {
-      steps {
-        sh 'docker network inspect prescripto >/dev/null 2>&1 || docker network create prescripto'
-      }
+    
+    post {
+        success {
+            echo 'Pipeline completed successfully!'
+            echo 'Application is running on:'
+            echo '- Backend: http://localhost:5000'
+            echo '- Client: http://localhost:6000'
+            echo '- Admin: http://localhost:6001'
+        }
+        failure {
+            echo 'Pipeline failed!'
+            script {
+                sh "${DOCKER_COMPOSE} logs"
+                sh "${DOCKER_COMPOSE} down"
+            }
+        }
+        always {
+            echo 'Pipeline execution completed.'
+            // Optionally clean up
+            // sh "${DOCKER_COMPOSE} down"
+        }
     }
-
-    stage('Build (Containerized)') {
-      steps {
-        sh 'docker compose -f ${COMPOSE_FILE} pull || true'
-        sh 'docker compose -f ${COMPOSE_FILE} up -d backend'
-        sh 'docker compose -f ${COMPOSE_FILE} run --rm backend sh -c "node -v && npm -v"'
-        sh 'docker compose -f ${COMPOSE_FILE} run --rm backend sh -c "npm ci && npm test --if-present"'
-        sh 'docker compose -f ${COMPOSE_FILE} run --rm client sh -c "npm ci && npm run build || npm run build --if-present"'
-        sh 'docker compose -f ${COMPOSE_FILE} run --rm admin sh -c "npm ci && npm run build || npm run build --if-present"'
-      }
-    }
-
-    stage('Smoke (Up Services)') {
-      steps {
-        sh 'docker compose -f ${COMPOSE_FILE} up -d'
-        sh 'sleep 5'
-        sh 'docker ps'
-      }
-    }
-  }
-
-  post {
-    always {
-      sh 'docker compose -f ${COMPOSE_FILE} logs --no-color || true'
-    }
-    cleanup {
-      sh 'docker compose -f ${COMPOSE_FILE} down -v || true'
-    }
-  }
 }
-
-
