@@ -339,3 +339,4 @@ docker-compose up -d
 
 **Remember**: Replace `YOUR_EC2_PUBLIC_IP` with your actual EC2 instance public IP address!
 
+

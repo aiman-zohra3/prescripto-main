@@ -155,7 +155,7 @@ sudo cat /var/lib/jenkins/secrets/initialAdminPassword
 Copy this password for the next step.
 
 ### 5.2 Access Jenkins Web Interface
-1. Open your browser and navigate to: `http://YOUR_EC2_PUBLIC_IP:8080`
+1. Open your browser and navigate to: `http://3.110.123.222:8080`
 2. Enter the initial admin password from Step 5.1
 3. Click "Install suggested plugins"
 4. Wait for plugin installation to complete
@@ -390,4 +390,5 @@ docker volume prune
 ---
 
 **Note**: Replace `YOUR_EC2_PUBLIC_IP` with your actual EC2 instance public IP address throughout this guide.
+
 

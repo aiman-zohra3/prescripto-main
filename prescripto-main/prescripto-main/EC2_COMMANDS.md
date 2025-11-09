@@ -369,3 +369,4 @@ curl -I http://localhost:6001
 
 **Note**: Replace `YOUR_EC2_PUBLIC_IP` with your actual EC2 instance public IP address in all commands and configurations.
 
+

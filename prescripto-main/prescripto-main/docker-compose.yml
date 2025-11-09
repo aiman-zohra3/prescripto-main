@@ -23,7 +23,7 @@ services:
     volumes:
       - ./clientside:/app
     environment:
-      - VITE_BACKEND_URL=http://YOUR_EC2_PUBLIC_IP:5000
+      - VITE_BACKEND_URL=http://3.110.123.222:5000
     depends_on:
       - backend
     ports:
@@ -40,7 +40,7 @@ services:
     volumes:
       - ./admin:/app
     environment:
-      - VITE_BACKEND_URL=http://YOUR_EC2_PUBLIC_IP:5000
+      - VITE_BACKEND_URL=http://3.110.123.222:5000
     depends_on:
       - backend
     ports:

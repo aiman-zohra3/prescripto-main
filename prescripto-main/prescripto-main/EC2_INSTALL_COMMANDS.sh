@@ -165,3 +165,4 @@ echo ""
 echo "Jenkins Initial Admin Password:"
 sudo cat /var/lib/jenkins/secrets/initialAdminPassword
 
+

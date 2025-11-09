@@ -85,9 +85,9 @@ pipeline {
         success {
             echo 'Pipeline completed successfully!'
             echo 'Application is running on:'
-            echo '- Backend: http://localhost:5000'
-            echo '- Client: http://localhost:6000'
-            echo '- Admin: http://localhost:6001'
+            echo '- Backend: http://3.110.123.222:5000'
+            echo '- Client: http://3.110.123.222:6000'
+            echo '- Admin: http://3.110.123.222:6001'
         }
         failure {
             echo 'Pipeline failed!'
